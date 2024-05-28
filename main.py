@@ -1,0 +1,174 @@
+from fastapi import FastAPI, Request, HTTPException
+from jose import JWTError, jwt
+from fastapi.responses import JSONResponse
+
+from api.endpoints import user
+from api.endpoints import company
+from api.endpoints import profile
+from api.endpoints import office
+from api.endpoints import sucursal
+from api.endpoints import action
+from api.endpoints import profileAction
+from api.endpoints import article
+from api.endpoints import active
+from api.endpoints import history
+from api.endpoints import generation_catalogo
+from api.endpoints import category
+from api.endpoints import data_android
+from api.endpoints import active_teorico
+from api.endpoints import report_conciliacion
+
+#cors
+from fastapi.middleware.cors import CORSMiddleware
+from decouple import config
+
+#DB
+from database import engine, SessionLocal
+
+#middleware
+from crud.profileAction import get_profile_action_by_id_profile_action
+from crud.action import get_action_by_name
+
+# models
+import re
+
+from models import user as user_model
+
+
+user_model.Base.metadata.create_all(bind=engine)
+
+app = FastAPI()
+
+# Configurar CORS
+origins = [
+    "http://localhost:5173",
+    "http://45.33.99.148",
+    "http://192.168.100.9:5173",
+    "http://45-33-99-148.ip.linodeusercontent.com",
+    "https://45-33-99-148.ip.linodeusercontent.com"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins= origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+#Variables
+SECRET_KEY = config('SECRET_KEY')
+ALGORITHM = config('ALGORITHM')
+
+# Middleware para las rutas
+@app.middleware("http")
+def middleware_validacion_permisos( request: Request, call_next):
+
+    # Verifica si es una solicitud OPTIONS y omitir la lógica de validación
+    if request.method == "OPTIONS":
+        return call_next(request)
+
+    # Path
+    path_peticion = request.url.path.split("/")[1]
+
+    if (path_peticion == "login" or path_peticion == "token" or path_peticion == "docs" or path_peticion == "openapi.json"):
+        return call_next(request)
+
+    #token
+    authorization_header = request.headers.get("Authorization")
+
+    # Base de datos
+    db = SessionLocal()
+
+    if authorization_header and authorization_header.startswith("Bearer "):
+        token_value = authorization_header.split(" ")[1]
+
+        try:
+            credentials = jwt.decode(token_value, SECRET_KEY, algorithms=[ALGORITHM])
+            profile_id = credentials.get("profile")
+
+            diccionario = {
+                "GET": "get",
+                "POST": "create",
+                "PUT": "update",
+                "DELETE": "delete"
+            }
+
+            # Se contruye el nombre de la accion
+            if (re.search(r'user', path_peticion, flags=re.IGNORECASE)):
+                nombre_accion = diccionario.get(request.method) + "-" + "usuario"
+            elif (re.search(r'compan', path_peticion, flags=re.IGNORECASE)):
+                nombre_accion = diccionario.get(request.method) + "-" + "empresa"
+
+            elif (re.search(r'sucursal', path_peticion, flags=re.IGNORECASE)):
+                nombre_accion = diccionario.get(request.method) + "-" + "sucursal"
+
+            elif (re.search(r'office', path_peticion, flags=re.IGNORECASE)):
+                nombre_accion = diccionario.get(request.method) + "-" + "oficina"
+
+            elif (re.search(r'action', path_peticion, flags=re.IGNORECASE)):
+                nombre_accion = diccionario.get(request.method) + "-" + "accion"
+
+            elif (re.search(r'profile', path_peticion, flags=re.IGNORECASE)):
+                nombre_accion = diccionario.get(request.method) + "-" + "perfil"
+
+            elif (re.search(r'active', path_peticion, flags=re.IGNORECASE)):
+                nombre_accion = diccionario.get(request.method) + "-" + "activo"
+
+            elif (re.search(r'article', path_peticion, flags=re.IGNORECASE)):
+                nombre_accion = diccionario.get(request.method) + "-" + "articulo"
+
+            elif (re.search(r'histor', path_peticion, flags=re.IGNORECASE)):
+                nombre_accion = diccionario.get(request.method) + "-" + "historial"
+
+            elif (re.search(r'report', path_peticion, flags=re.IGNORECASE)):
+                return call_next(request)
+
+            elif (re.search(r'categor', path_peticion, flags=re.IGNORECASE)):
+                return call_next(request)
+            elif (re.search(r'all', path_peticion, flags=re.IGNORECASE)):
+                return call_next(request)
+
+            else:
+                return JSONResponse(content={"detail": "La accion a realizar no existe"}, status_code=401)
+
+            print(nombre_accion)
+            accion = get_action_by_name(db, nombre_accion)
+            action_id = accion.id
+            profile_action = get_profile_action_by_id_profile_action(db, profile_id, action_id)
+
+            if (profile_action is None):
+                print("No tienes permisos para realizar esta acción 1")
+                return JSONResponse(content={"detail": "No tienes permisos para realizar esta acción"}, status_code=401)
+
+        except JWTError:
+            print ("Error al decodificar el token 2")
+            raise HTTPException(status_code=401, detail="Error al decodificar el token")
+
+
+
+
+
+    # Llama a la siguiente función en la cadena de middlewares y rutas
+    response = call_next(request)
+
+    # Lógica después de la ruta
+    print("Peticion realizada con exito")
+
+    return response
+
+app.include_router(user.router)
+app.include_router(profile.router)
+app.include_router(company.router)
+app.include_router(sucursal.router)
+app.include_router(office.router)
+app.include_router(action.router)
+app.include_router(profileAction.router)
+app.include_router(category.router)
+app.include_router(article.router)
+app.include_router(active.router)
+app.include_router(history.router)
+app.include_router(generation_catalogo.router)
+app.include_router(data_android.router)
+app.include_router(active_teorico.router)
+app.include_router(report_conciliacion.router)
